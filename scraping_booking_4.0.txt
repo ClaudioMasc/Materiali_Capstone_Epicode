@@ -1,0 +1,199 @@
+# scraper_booking_using_user_link.py
+# Requisiti: selenium, chromedriver compatibile con la versione Chrome installata
+# Esegui in Anaconda/Jupyter o come script python
+
+import time, random, csv, os, re
+from datetime import datetime, timedelta
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
+# ================= CONFIG =================
+# Inserisci QUI il link che ottieni da Booking con tutti i filtri impostati (MA puoi avere anche checkin/checkout; verranno sovrascritti)
+base_url = "https://www.booking.com/searchresults.it.html?label=gen173nr-10CAEoggI46AdIFFgEaHGIAQGYATO4ARfIAQzYAQPoAQH4AQGIAgGoAgG4AtKKvscGwAIB0gIkZTcyZGJkY2QtMGUwYS00MzE1LThmNDItOTI4NGQ0MWQ1Yzdh2AIB4AIB&aid=304142&ss=Best+Western+Hotel+dei+Mille%2C+Napoli%2C+Campania%2C+Italia&ssne=Napoli&ssne_untouched=Napoli&lang=it&dest_id=821301&dest_type=hotel&ac_position=0&ac_click_type=b&ac_langcode=it&ac_suggestion_list_length=1&search_selected=true&search_pageview_id=ee1d718256d107d2&checkin=2025-10-20&checkout=2025-10-21&group_adults=2&no_rooms=1&group_children=0&nflt=ht_id%3D204%3Bclass%3D4"
+
+# Periodo che vuoi scaricare (modifica)
+start_date = datetime(2026, 4, 30)
+end_date   = datetime(2026, 11, 1)
+
+# Output
+output_file = "data/booking_napoli_4stelle_parte2_4.0.csv"
+os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+# Parametri di comportamento
+MAX_HOTELS_PER_DAY = 75
+RESTART_BROWSER_EVERY_N_DAYS = 12     # riavvia webdriver ogni N giorni per evitare cache/session issues
+MAX_SCROLLS = 15                      # numero massimo di scroll per pagina (aumenta se vuoi più risultati)
+WAIT_FOR_MIN_HOTELS = 6               # attende fino a che ci siano almeno questi hotel (semplice controllo)
+PAGE_LOAD_TIMEOUT = 12                # timeout per caricamento iniziale (s)
+HEADLESS = False                      # True se vuoi eseguire senza aprire il browser
+
+# ======== funzioni help per modificare URL =========
+def replace_checkin_checkout(url, checkin, checkout):
+    """Sovrascrive (o aggiunge) i parametri checkin/checkout in un URL."""
+    parsed = urlparse(url)
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    qs['checkin'] = [checkin]
+    qs['checkout'] = [checkout]
+    # ricostruisco query string
+    new_query = urlencode(qs, doseq=True)
+    new_parsed = parsed._replace(query=new_query)
+    return urlunparse(new_parsed)
+
+# ======== setup webdriver =========
+def new_driver():
+    options = Options()
+    if HEADLESS:
+        options.add_argument("--headless=new")
+    options.add_argument("--incognito")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--start-maximized")
+    # opzioni addizionali se necessario
+    return webdriver.Chrome(options=options)
+
+driver = new_driver()
+
+# ========== scraping loop ===========
+with open(output_file, mode="w", newline="", encoding="utf-8") as csvfile:
+    writer = csv.writer(csvfile)
+    writer.writerow(["Checkin", "Checkout", "Nome", "Prezzo", "Punteggio"])
+
+    current = start_date
+    day_counter = 0
+
+    while current <= end_date:
+        checkin = current.strftime("%Y-%m-%d")
+        checkout = (current + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # costruisco URL usando la funzione che sostituisce i parametri
+        url = replace_checkin_checkout(base_url, checkin, checkout)
+        print(f"\n🔍 {checkin} → {checkout}  | URL length: {len(url)}")
+
+        try:
+            driver.get(url)
+        except Exception as e:
+            print("Errore get():", e)
+            # riapro il driver e riprovo
+            driver.quit()
+            driver = new_driver()
+            driver.get(url)
+
+        # attesa iniziale ragionevole (dinamica)
+        t0 = time.time()
+        base_sleep = 2.0
+        time.sleep(base_sleep + random.uniform(0.5, 2.0))
+
+        # scroll graduale: proviamo a caricare più risultati possibile
+        prev_count = 0
+        for scroll_i in range(MAX_SCROLLS):
+            # scroll
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            # attesa breve
+            time.sleep(0.7 + random.uniform(0.0, 0.8))
+
+            # controllo quanti card sono presenti
+            cards = driver.find_elements(By.CSS_SELECTOR, "div[data-testid='property-card']")
+            count_cards = len(cards)
+            # se la pagina non cresce più o abbiamo già abbastanza elementi, usciamo
+            if count_cards >= MAX_HOTELS_PER_DAY:
+                break
+            if count_cards == prev_count:
+                # possibile che servlet non carichi altro; facciamo ancora qualche iterazione
+                pass
+            prev_count = count_cards
+
+        # dopo scrolling, attendiamo che ci siano almeno qualche card (o timeout)
+        try:
+            WebDriverWait(driver, PAGE_LOAD_TIMEOUT).until(
+                lambda d: len(d.find_elements(By.CSS_SELECTOR, "div[data-testid='property-card']")) >= WAIT_FOR_MIN_HOTELS
+            )
+        except Exception:
+            # non abbastanza elementi entro timeout, procediamo comunque
+            pass
+
+        hotels = driver.find_elements(By.CSS_SELECTOR, "div[data-testid='property-card']")
+        print(f"➡️  elementi trovati: {len(hotels)}")
+        saved = 0
+
+        for h in hotels:
+            if saved >= MAX_HOTELS_PER_DAY:
+                break
+
+            # estrai nome
+            try:
+                name = h.find_element(By.CSS_SELECTOR, "div[data-testid='title']").text.strip()
+            except:
+                name = "N/D"
+
+            # estrai prezzo (più selettori possibili per robustezza)
+            price = "N/D"
+            possible_price_selectors = [
+                "span[data-testid='price-and-discounted-price']",
+                "span[data-testid='price-and-discounted-price'] > strong",
+                "span[class*='price']",
+                "div[data-testid='price-and-discounted-price'] span"
+            ]
+            for sel in possible_price_selectors:
+                try:
+                    el = h.find_element(By.CSS_SELECTOR, sel)
+                    val = el.text.strip()
+                    if val:
+                        price = val
+                        break
+                except:
+                    continue
+
+            # estrai punteggio (solo numero)
+            score = "N/D"
+            try:
+                # proviamo più strategie: primo child del blocco review-score o selettore comune
+                score_el = h.find_element(By.CSS_SELECTOR, "div[data-testid='review-score']")
+                # molti layout: prendo il primo testo numerico che contiene una virgola o punto
+                txt = score_el.text.strip()
+                # tentiamo di trovare pattern 8,5 o 8.5 oppure singolo numero
+                m = re.search(r'(\d{1,2}[,\.]\d)', txt)
+                if m:
+                    score = m.group(1)
+                else:
+                    # fallback: cerca dentro i discendenti
+                    desc = score_el.find_elements(By.XPATH, ".//*")
+                    for d in desc:
+                        t = d.text.strip()
+                        if re.match(r'^\d{1,2}[,\.]\d$', t):
+                            score = t
+                            break
+            except Exception:
+                score = "N/D"
+
+            writer.writerow([checkin, checkout, name, price, score])
+            saved += 1
+
+        print(f"💾 Salvati {saved} hotel per {checkin}")
+
+        # gestione sessione / cache: ogni tot giorni restart driver
+        day_counter += 1
+        if day_counter % RESTART_BROWSER_EVERY_N_DAYS == 0:
+            print("🔄 Riavvio driver per evitare cache/session issues...")
+            driver.delete_all_cookies()
+            try:
+                driver.quit()
+            except:
+                pass
+            driver = new_driver()
+            time.sleep(2 + random.uniform(0.5, 1.5))
+
+        # breve pausa random tra i giorni (non troppo lunga ma non zero)
+        time.sleep(1 + random.uniform(0.3, 1.2))
+        current += timedelta(days=1)
+
+# chiudo driver
+try:
+    driver.quit()
+except:
+    pass
+
+print("\n✅ Scraping completato. File salvato in:", output_file)
