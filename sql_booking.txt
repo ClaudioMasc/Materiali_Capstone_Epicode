@@ -1,0 +1,145 @@
+CREATE DATABASE IF NOT EXISTS booking_data;
+USE booking_data;
+CREATE TABLE booking_3stelle_parte1 (
+  Checkin DATE,
+  Checkout DATE,
+  Nome VARCHAR(255),
+  Prezzo VARCHAR(50),
+  Punteggio VARCHAR(20)
+);
+
+CREATE TABLE booking_3stelle_parte2 LIKE booking_3stelle_parte1;
+CREATE TABLE booking_4stelle_parte1 LIKE booking_3stelle_parte1;
+CREATE TABLE booking_4stelle_parte2 LIKE booking_3stelle_parte1;
+LOAD DATA INFILE 'C:\Users\ACER\Downloads/booking_napoli_3stelle_parte1_4.0.csv'
+INTO TABLE booking_3stelle_parte1
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(Checkin, Checkout, Nome, Prezzo, Punteggio);
+SHOW VARIABLES LIKE 'secure_file_priv';
+
+ALTER TABLE booking_3stelle_parte1 
+MODIFY COLUMN Punteggio VARCHAR(50);
+ALTER TABLE booking_3stelle_parte1 
+MODIFY COLUMN Punteggio TEXT;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/booking_napoli_3stelle_parte1_4.0.csv'
+INTO TABLE booking_3stelle_parte1
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\n'
+IGNORE 1 ROWS
+(Checkin, Checkout, Nome, Prezzo, Punteggio);
+ALTER TABLE booking_3stelle_parte1 
+MODIFY COLUMN Punteggio LONGTEXT;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/booking_napoli_3stelle_parte1_4.0.csv'
+INTO TABLE booking_3stelle_parte1
+FIELDS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'  -- o '\n', in base al file
+IGNORE 1 ROWS
+(Checkin, Checkout, Nome, Prezzo, @raw_punteggio)
+SET Punteggio = @raw_punteggio;
+
+SELECT * FROM booking_3stelle_parte1
+LIMIT 10;
+
+ALTER TABLE booking_3stelle_parte2 
+MODIFY COLUMN Punteggio LONGTEXT;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/booking_napoli_3stelle_parte2_4.0.csv'
+INTO TABLE booking_3stelle_parte2
+FIELDS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'  -- o '\n', in base al file
+IGNORE 1 ROWS
+(Checkin, Checkout, Nome, Prezzo, @raw_punteggio)
+SET Punteggio = @raw_punteggio;
+
+ALTER TABLE booking_3stelle_parte2
+ADD COLUMN Classificazione VARCHAR(20);
+
+SET SQL_SAFE_UPDATES = 0;
+
+UPDATE booking_3stelle_parte2
+SET Classificazione = '3 stelle';
+
+SET SQL_SAFE_UPDATES = 1;  -- (opzionale) riattiva safe update
+
+
+SELECT * FROM booking_3stelle_parte2
+LIMIT 10;
+
+ALTER TABLE booking_4stelle_parte1 
+MODIFY COLUMN Punteggio LONGTEXT;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/booking_napoli_4stelle_parte1_4.0.csv'
+INTO TABLE booking_4stelle_parte1
+FIELDS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'  -- o '\n', in base al file
+IGNORE 1 ROWS
+(Checkin, Checkout, Nome, Prezzo, @raw_punteggio)
+SET Punteggio = @raw_punteggio;
+
+ALTER TABLE booking_4stelle_parte1
+ADD COLUMN Classificazione VARCHAR(20);
+
+SET SQL_SAFE_UPDATES = 0;
+
+UPDATE booking_4stelle_parte1
+SET Classificazione = '4 stelle';
+
+SET SQL_SAFE_UPDATES = 1;  -- (opzionale) riattiva safe update
+
+
+SELECT * FROM booking_4stelle_parte1
+LIMIT 10;
+
+ALTER TABLE booking_4stelle_parte2
+MODIFY COLUMN Punteggio LONGTEXT;
+LOAD DATA INFILE 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/booking_napoli_4stelle_parte2_4.0.csv'
+INTO TABLE booking_4stelle_parte2
+FIELDS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'  -- o '\n', in base al file
+IGNORE 1 ROWS
+(Checkin, Checkout, Nome, Prezzo, @raw_punteggio)
+SET Punteggio = @raw_punteggio;
+
+ALTER TABLE booking_4stelle_parte2
+ADD COLUMN Classificazione VARCHAR(20);
+
+SET SQL_SAFE_UPDATES = 0;
+
+UPDATE booking_4stelle_parte2
+SET Classificazione = '4 stelle';
+
+SET SQL_SAFE_UPDATES = 1;  -- (opzionale) riattiva safe update
+
+
+SELECT * FROM booking_4stelle_parte2
+LIMIT 10;
+
+CREATE TABLE booking_3stelle_total AS
+SELECT *
+FROM booking_3stelle_parte1
+UNION ALL
+SELECT *
+FROM booking_3stelle_parte2;
+
+CREATE TABLE booking_4stelle_total AS
+SELECT *
+FROM booking_4stelle_parte1
+UNION ALL
+SELECT *
+FROM booking_4stelle_parte2;
+
+-- Controllo 3 stelle
+SELECT COUNT(*) AS totale_righe, Classificazione
+FROM booking_3stelle_total
+GROUP BY Classificazione;
+
+-- Controllo 4 stelle
+SELECT COUNT(*) AS totale_righe, Classificazione
+FROM booking_4stelle_total
+GROUP BY Classificazione;
